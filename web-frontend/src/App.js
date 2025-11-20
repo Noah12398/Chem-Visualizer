@@ -23,40 +23,71 @@ function App() {
   const [datasets, setDatasets] = useState([]);
   const [selected, setSelected] = useState(null);
   const [auth, setAuth] = useState(null);
+  const [error, setError] = useState(null);
 
+  // Prompt login
   const askCredentials = () => {
     const username = window.prompt("Enter your username:");
     const password = window.prompt("Enter your password:");
-    if (username && password) {
-      setAuth({ username, password });
-      return { username, password };
-    } else {
-      alert("Username and password are required!");
+    if (!username || !password) {
+      alert("Username and password required");
       return null;
     }
+    return { username, password };
   };
-const fetchDatasets = async () => {
-  let credentials = auth;
-  if (!credentials) {
-    credentials = askCredentials();
-    if (!credentials) return;
-  }
 
-  console.log("Sending credentials:", credentials); // will log username & password
+  // Fetch
+  const fetchDatasets = async () => {
+    let credentials = auth;
 
-  try {
-    const res = await axios.get("/api/datasets/", {
-      auth: credentials, // use local variable, not state
-    });
-    setDatasets(res.data);
-    if (res.data.length) setSelected(res.data[0]);
-    setAuth(credentials); // now store for future requests
-  } catch (err) {
-    console.error(err);
-    alert("Login failed or cannot fetch datasets. Try again.");
-    setAuth(null); // reset auth if failed
-  }
-};
+    if (!credentials) {
+      credentials = askCredentials();
+      if (!credentials) return;
+    }
+
+    try {
+      const res = await axios.get("/api/datasets/", {
+        auth: credentials,
+        validateStatus: () => true
+      });
+
+      // Wrong password
+      if (res.status === 401) {
+        alert("Invalid username or password!");
+        setAuth(null);
+        setDatasets([]);
+        setSelected(null);
+        return;
+      }
+
+      // Server error
+      if (res.status >= 500) {
+        alert("Server error occurred");
+        setDatasets([]);
+        setSelected(null);
+        return;
+      }
+
+      // Unexpected response
+      if (!Array.isArray(res.data)) {
+        console.warn("Unexpected API response:", res.data);
+        setDatasets([]);
+        setSelected(null);
+        return;
+      }
+
+      setAuth(credentials);
+      setDatasets(res.data);
+      setSelected(res.data.length ? res.data[0] : null);
+
+    } catch (err) {
+      console.error(err);
+      alert("Network error — cannot reach server");
+      setDatasets([]);
+      setSelected(null);
+      setAuth(null);
+    }
+  };
 
   useEffect(() => {
     fetchDatasets();
@@ -64,7 +95,6 @@ const fetchDatasets = async () => {
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "#f5f5f7" }}>
-      {/* 🔷 Top Bar */}
       <AppBar position="static" color="primary" elevation={2}>
         <Toolbar>
           <Typography variant="h6">
@@ -74,7 +104,6 @@ const fetchDatasets = async () => {
       </AppBar>
 
       <Container maxWidth="xl" sx={{ mt: 3 }}>
-        {/* Upload Section */}
         <Card sx={{ p: 2, mb: 3 }}>
           <Typography variant="h6" gutterBottom>
             Upload Dataset
@@ -83,7 +112,6 @@ const fetchDatasets = async () => {
         </Card>
 
         <Box sx={{ display: "flex", gap: 3 }}>
-          {/* 🔹 Sidebar History List */}
           <Paper
             elevation={2}
             sx={{
@@ -100,19 +128,18 @@ const fetchDatasets = async () => {
             <Divider sx={{ mb: 2 }} />
 
             <List>
-              {datasets.map((d) => {
-                const filename = d.file.split("/").pop();
-                const time = new Date(d.uploaded_at).toLocaleString();
+              {(datasets || []).map((d) => {
+                const filename = d.file?.split("/").pop() || "Unknown file";
+                const time = d.uploaded_at
+                  ? new Date(d.uploaded_at).toLocaleString()
+                  : "Unknown time";
 
                 return (
                   <ListItem disablePadding key={d.id}>
                     <ListItemButton
                       selected={selected?.id === d.id}
                       onClick={() => setSelected(d)}
-                      sx={{
-                        borderRadius: 2,
-                        mb: 1,
-                      }}
+                      sx={{ borderRadius: 2, mb: 1 }}
                     >
                       <ListItemText
                         primary={filename}
@@ -126,7 +153,6 @@ const fetchDatasets = async () => {
             </List>
           </Paper>
 
-          {/* 🔹 Main Content */}
           <Box sx={{ flexGrow: 1 }}>
             {selected ? (
               <>
@@ -141,12 +167,14 @@ const fetchDatasets = async () => {
                   <Typography variant="h6" gutterBottom>
                     Charts Summary
                   </Typography>
-                  <Charts summary={selected.summary} />
+                  <Charts summary={selected.summary || {}} />
                 </Card>
               </>
             ) : (
               <Card sx={{ p: 3, textAlign: "center" }}>
-                <Typography variant="h6">Select a dataset to view data</Typography>
+                <Typography variant="h6">
+                  No dataset selected — login or upload one
+                </Typography>
               </Card>
             )}
           </Box>
