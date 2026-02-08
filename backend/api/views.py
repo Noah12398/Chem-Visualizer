@@ -3,8 +3,11 @@ import pandas as pd
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, generics
+from rest_framework.permissions import AllowAny
+from django.http import HttpResponse
+from django.contrib.auth.models import User
 from .models import Dataset
-from .serializers import DatasetSerializer
+from .serializers import DatasetSerializer, UserSerializer
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
@@ -39,9 +42,10 @@ class UploadCSVView(APIView):
         }
 
         csv_file.seek(0)
-        dataset = Dataset.objects.create(file=csv_file, summary=summary)
+        dataset = Dataset.objects.create(file=csv_file, summary=summary, uploaded_by=request.user)
 
-        qs = Dataset.objects.order_by('-uploaded_at')
+        # Keep only last 5 datasets per user
+        qs = Dataset.objects.filter(uploaded_by=request.user).order_by('-uploaded_at')
         if qs.count() > 5:
             for old in qs[5:]:
                 old.file.delete(save=False)
@@ -50,13 +54,30 @@ class UploadCSVView(APIView):
         serializer = DatasetSerializer(dataset)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+
 class DatasetListView(generics.ListAPIView):
-    queryset = Dataset.objects.order_by('-uploaded_at')[:5]
     serializer_class = DatasetSerializer
 
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_staff or user.is_superuser:
+            # Admin users see all datasets from all users
+            return Dataset.objects.order_by('-uploaded_at')[:5]
+        else:
+            # Regular users see only their own datasets
+            return Dataset.objects.filter(uploaded_by=user).order_by('-uploaded_at')[:5]
+
+
 class DatasetDetailView(generics.RetrieveAPIView):
-    queryset = Dataset.objects.all()
     serializer_class = DatasetSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_staff or user.is_superuser:
+            return Dataset.objects.all()
+        else:
+            return Dataset.objects.filter(uploaded_by=user)
+
 
 class GeneratePDFView(APIView):
     def get(self, request, pk):
@@ -82,4 +103,18 @@ class GeneratePDFView(APIView):
                 y = 750
         p.save()
         buffer.seek(0)
-        return Response(buffer.getvalue(), content_type='application/pdf')
+        
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="dataset_{dataset.id}_report.pdf"'
+        return response
+
+
+class RegisterView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = UserSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({'message': 'User created successfully'}, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

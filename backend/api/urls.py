@@ -1,7 +1,8 @@
 from django.urls import path
-from .views import UploadCSVView, DatasetListView, DatasetDetailView, GeneratePDFView
+from .views import UploadCSVView, DatasetListView, DatasetDetailView, GeneratePDFView, RegisterView
 
 urlpatterns = [
+    path('register/', RegisterView.as_view(), name='register'),
     path('upload/', UploadCSVView.as_view(), name='upload-csv'),
     path('datasets/', DatasetListView.as_view(), name='datasets-list'),
     path('datasets/<int:pk>/', DatasetDetailView.as_view(), name='dataset-detail'),
